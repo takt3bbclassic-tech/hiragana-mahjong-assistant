@@ -39,19 +39,38 @@ function getWordPlansFromTiles(tiles, dictionary) {
   const addPlan = (words, kind) => {
     const pairCount = words.filter((word) => word.length === 2).length;
     const mentsuCount = words.filter((word) => word.length >= 3).length;
-    if (pairCount > 1) return;
+    const isSevenPairsLike = pairCount >= 2 && mentsuCount === 0;
+    if (pairCount > 1 && !isSevenPairsLike) return;
+    if (isSevenPairsLike && pairCount > 7) return;
     if (pairCount === 1 && mentsuCount > 4) return;
     if (pairCount === 0 && mentsuCount > 4) return;
     let remaining = [...chars];
     for (const word of words) { const next = consumeWordChars(remaining, word); if (!next) return; remaining = next; }
-    const key = `${kind}:${words.join("/")}`;
+    const planKind = isSevenPairsLike ? "七対子候補" : kind;
+    const key = `${planKind}:${words.join("/")}`;
     if (seen.has(key)) return;
     seen.add(key);
     const used = chars.length - remaining.length;
     const longCount = words.filter((word) => word.length >= 3).length;
-    const score = mentsuCount * 40 + pairCount * 18 + Math.max(...words.map((word) => word.length)) * 12 + longCount * 10 + used;
-    plans.push({ words, remaining, used, score, kind, pairCount, mentsuCount });
+    const score = (isSevenPairsLike ? 70 + pairCount * 18 : 0) + mentsuCount * 40 + pairCount * 18 + Math.max(...words.map((word) => word.length)) * 12 + longCount * 10 + used;
+    plans.push({ words, remaining, used, score, kind: planKind, pairCount, mentsuCount });
   };
+  const pairBase = base.filter((entry) => entry.word.length === 2).slice(0, 24);
+  const addPairPlan = (seedIndex = null) => {
+    let remaining = [...chars];
+    const words = [];
+    const ordered = seedIndex == null ? pairBase : [pairBase[seedIndex], ...pairBase.filter((_, i) => i !== seedIndex)];
+    for (const entry of ordered) {
+      if (words.length >= 7) break;
+      const next = consumeWordChars(remaining, entry.word);
+      if (!next) continue;
+      words.push(entry.word);
+      remaining = next;
+    }
+    if (words.length >= 2) addPlan(words, "七対子候補");
+  };
+  addPairPlan(null);
+  pairBase.slice(0, 12).forEach((_, index) => addPairPlan(index));
   base.slice(0, 16).forEach((entry) => addPlan([entry.word], entry.word.length === 2 ? "雀頭候補" : "単独"));
   for (let i = 0; i < Math.min(base.length, 14); i += 1) for (let j = i + 1; j < Math.min(base.length, 18); j += 1) addPlan([base[i].word, base[j].word], "2候補");
   for (let i = 0; i < Math.min(base.length, 8); i += 1) for (let j = i + 1; j < Math.min(base.length, 10); j += 1) for (let k = j + 1; k < Math.min(base.length, 12); k += 1) addPlan([base[i].word, base[j].word, base[k].word], "3候補");
@@ -73,7 +92,7 @@ function AssistPanel({ level, hand, fixedBlocks, selectedTiles, dictionary }) {
   if (level === 0) return <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-3xl bg-white p-4 shadow-sm"><h2 className="mb-2 flex items-center gap-2 font-black"><Sparkles size={18} />アシスト Lv0</h2><p className="text-sm text-stone-500">完全ノーアシストです。</p></aside>;
   const longWords = words.filter((entry) => entry.word.length >= 3);
   const pairWords = words.filter((entry) => entry.word.length === 2);
-  return <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-3xl bg-white p-4 shadow-sm"><div className="mb-3 flex items-center justify-between gap-2"><h2 className="flex items-center gap-2 font-black"><Sparkles size={18} />アシスト Lv{level}</h2>{level >= 2 && <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-bold">形評価 {score}</span>}</div><div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1 sm:pr-2"><section><h3 className="mb-2 font-bold">待ち候補</h3>{waits.length ? <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{waits.map((w, i) => <div key={`${w.word}-${i}`} className="rounded-2xl bg-emerald-50 p-2 text-sm text-emerald-900"><b>{w.word}</b> <span className="text-xs">待ち:{w.wait}</span></div>)}</div> : <p className="text-sm text-stone-400">待ち候補なし</p>}</section>{level >= 2 && <section><h3 className="mb-2 font-bold">3文字以上の候補</h3><div className="flex flex-wrap gap-2">{longWords.length ? longWords.slice(0, 24).map((entry) => <span key={entry.word} className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-900">{entry.word}</span>) : <p className="text-sm text-stone-400">3文字以上の成立候補なし</p>}</div></section>}{level >= 2 && <section><h3 className="mb-2 font-bold">雀頭候補</h3><div className="flex flex-wrap gap-2">{pairWords.length ? pairWords.slice(0, 12).map((entry) => <span key={entry.word} className="rounded-full border px-3 py-1 text-xs font-bold">{entry.word}</span>) : <p className="text-sm text-stone-400">2文字候補なし</p>}</div></section>}{level >= 3 && <section className="rounded-2xl bg-amber-50 p-3 text-sm text-amber-950"><h3 className="mb-2 font-bold">組み換えおすすめ</h3><p className="mb-2 text-xs text-amber-700">カン確定ブロックを除いた牌から、複数の雀頭を含む非アガリ形を避けて候補を出します。2文字は雀頭候補として1つまで扱います。</p>{lv3Plans.length ? <div className="space-y-2">{lv3Plans.map((plan, index) => <div key={`${plan.words.join("-")}-${index}`} className="rounded-2xl bg-white/80 p-2"><div className="flex flex-wrap items-center gap-1.5"><span className="rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-black text-white">{plan.kind}</span>{plan.words.map((word) => <span key={word} className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-950">{word}</span>)}</div><p className="mt-1 text-[11px] text-amber-700">使用 {plan.used}枚 / 残り {plan.remaining.length ? plan.remaining.join("・") : "なし"}</p></div>)}</div> : <p className="text-sm text-amber-700">組み換え候補なし</p>}</section>}</div></aside>;
+  return <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-3xl bg-white p-4 shadow-sm"><div className="mb-3 flex items-center justify-between gap-2"><h2 className="flex items-center gap-2 font-black"><Sparkles size={18} />アシスト Lv{level}</h2>{level >= 2 && <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-bold">形評価 {score}</span>}</div><div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1 sm:pr-2"><section><h3 className="mb-2 font-bold">待ち候補</h3>{waits.length ? <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{waits.map((w, i) => <div key={`${w.word}-${i}`} className="rounded-2xl bg-emerald-50 p-2 text-sm text-emerald-900"><b>{w.word}</b> <span className="text-xs">待ち:{w.wait}</span></div>)}</div> : <p className="text-sm text-stone-400">待ち候補なし</p>}</section>{level >= 2 && <section><h3 className="mb-2 font-bold">3文字以上の候補</h3><div className="flex flex-wrap gap-2">{longWords.length ? longWords.slice(0, 24).map((entry) => <span key={entry.word} className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-900">{entry.word}</span>) : <p className="text-sm text-stone-400">3文字以上の成立候補なし</p>}</div></section>}{level >= 2 && <section><h3 className="mb-2 font-bold">雀頭候補</h3><div className="flex flex-wrap gap-2">{pairWords.length ? pairWords.slice(0, 12).map((entry) => <span key={entry.word} className="rounded-full border px-3 py-1 text-xs font-bold">{entry.word}</span>) : <p className="text-sm text-stone-400">2文字候補なし</p>}</div></section>}{level >= 3 && <section className="rounded-2xl bg-amber-50 p-3 text-sm text-amber-950"><h3 className="mb-2 font-bold">組み換えおすすめ</h3><p className="mb-2 text-xs text-amber-700">通常形では2文字は雀頭候補として1つまで、七対子型では2文字×複数を候補に残します。</p>{lv3Plans.length ? <div className="space-y-2">{lv3Plans.map((plan, index) => <div key={`${plan.words.join("-")}-${index}`} className="rounded-2xl bg-white/80 p-2"><div className="flex flex-wrap items-center gap-1.5"><span className="rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-black text-white">{plan.kind}</span>{plan.words.map((word) => <span key={word} className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-950">{word}</span>)}</div><p className="mt-1 text-[11px] text-amber-700">使用 {plan.used}枚 / 残り {plan.remaining.length ? plan.remaining.join("・") : "なし"}</p></div>)}</div> : <p className="text-sm text-amber-700">組み換え候補なし</p>}</section>}</div></aside>;
 }
 function HomeScreen({ onStart, savedGame, onLoadSaved, onClearSaved, userWords, dictionaryLength, onAddUserWords }) {
   const [mode, setMode] = useState("random");
