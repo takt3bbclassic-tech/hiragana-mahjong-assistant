@@ -4,13 +4,6 @@ import path from "node:path";
 const appPath = path.join(process.cwd(), "src", "App.jsx");
 let source = fs.readFileSync(appPath, "utf8");
 
-function replaceRequired(search, replacement, label) {
-  if (!source.includes(search)) {
-    throw new Error(`Could not find ${label}`);
-  }
-  source = source.split(search).join(replacement);
-}
-
 const reactImport = 'import React, { useMemo, useState } from "react";';
 const wordsImport = 'import { BASE_WORDS, BASE_WORD_COUNT } from "./words.js";';
 
@@ -30,16 +23,17 @@ if (source.includes("const BASE_WORDS_TEXT =") || source.includes("BASE_WORDS_TE
   throw new Error("src/App.jsx still contains inline BASE_WORDS_TEXT");
 }
 
-replaceRequired(
-  "const selectedTiles = hand.filter((tile) => selectedIds.includes(tile.id));",
-  "const selectedTiles = selectedIds.map((id) => hand.find((tile) => tile.id === id)).filter(Boolean);",
-  "selectedTiles hand-order expression"
-);
+const handOrderSelectedTiles = "const selectedTiles = hand.filter((tile) => selectedIds.includes(tile.id));";
+const clickOrderSelectedTiles = "const selectedTiles = selectedIds.map((id) => hand.find((tile) => tile.id === id)).filter(Boolean);";
+
+if (source.includes(handOrderSelectedTiles)) {
+  source = source.replace(handOrderSelectedTiles, clickOrderSelectedTiles);
+}
 
 if (!source.includes(wordsImport)) {
   throw new Error("src/App.jsx is missing words import");
 }
-if (!source.includes("const selectedTiles = selectedIds.map((id) => hand.find((tile) => tile.id === id)).filter(Boolean);")) {
+if (!source.includes(clickOrderSelectedTiles)) {
   throw new Error("src/App.jsx does not preserve selected tile click order");
 }
 
